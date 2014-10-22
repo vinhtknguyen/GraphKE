@@ -1,0 +1,1 @@
+SUBDIRS = load transform query
