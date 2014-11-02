@@ -720,12 +720,15 @@ char *clean_uri(const char *uri, char *chrs){
 	return uri;
 }
 
+void print_header(){
+	puts("---------------------------------------------------------------");
+	puts("\tGRAPHKE: A graph engine for knowledge management");
+	puts("\tCopyright(C) 2014 by Vinh Nguyen, vinh@knoesis.org.");
+	puts("---------------------------------------------------------------");
+}
 
 int main(int argc, char ** argv)
 {
-	puts("Transforming the RDFXML data file from RDF Reification to Singleton Property representation.");
-	puts("Copyrighted by Vinh Nguyen, 2014.\n");
-	/* prints From Reification to Singleton Property */
 
 	char * folder_in;
 	char * folder_out;
@@ -733,6 +736,8 @@ int main(int argc, char ** argv)
 
 	if (argc < 4 || argc == 1){
 		/* prints From Reification to Singleton Property */
+		puts("The purpose of this program is to convert RDF data file \nfrom reification representation into singleton property representation\n");
+		puts("More information about the singleton property approach is available at http://wiki.knoesis.org/RDF_Singleton_Property\n");
 		puts("Usage: r2sp base-uri-sp /path/to/folder/in /path/to/folder/out");
 		puts("Arguments:");
 		puts("\tbase-uri-sp\tA prefix URI for singleton properties");

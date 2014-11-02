@@ -1,14 +1,11 @@
 #include <stdio.h>
 #include <stdlib.h>
-typedef int pri_type;
-typedef struct { void * data; pri_type pri; } q_elem_t;
-typedef struct { q_elem_t *buf; pri_type n, alloc; } pri_queue_t, *pri_queue;
+#include <pqueue.h>
 
-#define priq_purge(q) (q)->n = 1
-#define priq_size(q) ((q)->n - 1)
 /* first element in array not used to simplify indices */
 pri_queue priq_new(pri_type size)
 {
+
 	if (size < 4) size = 4;
 
 	pri_queue q = malloc(sizeof(pri_queue_t));
