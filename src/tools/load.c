@@ -10,18 +10,29 @@
 /* Function implementation */
 
 
-print_header(){
-	puts("GraphKE:\t A knowledge management");
-	puts("Copyrighted by Vinh Nguyen, 2014");
+
+void print_header(){
+	puts("---------------------------------------------------------------");
+	puts("\tGraph engine for knowledge management");
+	puts("\tCopyright(C) 2014 by Vinh Nguyen, vinh@knoesis.org.");
+	puts("---------------------------------------------------------------");
 }
 
+
 print_usage(){
-	puts("graphke_load db_name data_folder data_format");
-	puts("Arguments\n");
-	puts("\tdb_name \tName of the database to be created");
+	puts("\nCommand:\n"
+			"\tgraphke_load db_name data_folder data_format");
+	puts("Arguments");
+	puts("\tdb_name\t Name of the database to be created");
 	puts("\tdata_folder\t Location to the data directory");
-	puts("Options\n");
-	puts("\tdata_format\t Format of data input, default is ntriples\n");
+	puts("Options");
+	puts("\tdata_format\t Format of data input, default is ntriples");
+	puts("\tnthreads\t Number of threads to load the data");
+	puts("\tbulksize\t Buffer size in MB for bulk loading data");
+	puts("\tdebug\t\t If set to 1, progress will be shown.");
+	puts("Example:");
+	puts("\tgraphke_load yago2ssp /home/vinh/yago2s/datafiles ntriples nthreads=5 bulksize=1024 debug=1");
+	puts("");
 
 }
 
@@ -40,7 +51,7 @@ int main(int argc, char *argsv[]) {
 		// Pre-check the database
 
 		int nrounds = 1;
-		bulk_size = BULK_SIZE;
+		bulk_size = 1024;
 		DEBUG = 0;
 		// Pre-check the data dir
 		int count = count_data_files(rdf_datadir);

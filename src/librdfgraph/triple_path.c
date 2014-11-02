@@ -906,10 +906,10 @@ int explore_neighbors_loop(PATHNODE **pathnodes, DB *dbp, id_type startid, id_ty
 					return distance+1;
 				}
 				if (predicate % 2 == 0 && sink_excluded == 1){
-					if (ret1 == 1){
+//					if (ret1 == 1){
 						// Shorter distance found
 						priq_push(pqueue, (void*)predicate, distance + 1);
-					}
+//					}
 				}
 
 				//			ret1 = put_tmp_db(tmp_db, object, predicate, distance + 2);
@@ -929,10 +929,10 @@ int explore_neighbors_loop(PATHNODE **pathnodes, DB *dbp, id_type startid, id_ty
 					return distance+2;
 				}
 				if (object % 2 == 0 && sink_excluded == 1){
-					if (ret1 == 1){
+//					if (ret1 == 1){
 						// Shorter distance found
 						priq_push(pqueue, (void*)object, distance + 2);
-					}
+//					}
 				}
 
 				break;

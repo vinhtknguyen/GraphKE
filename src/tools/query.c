@@ -113,8 +113,7 @@ int main(int argc, char *argsv[]) {
 	if (DEBUG == 1) printf("Current directory is:%s\n", db_home_str);
 
 	if (db_name == NULL){
-		printf("Please specify a database\n");
-		print_usage();
+		printf("Please specify a database to load\n");
 		exit(0);
 	}
 	if (db_home_str != NULL){

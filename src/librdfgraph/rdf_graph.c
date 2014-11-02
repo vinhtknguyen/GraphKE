@@ -2285,6 +2285,7 @@ MYTRIPLES* resolve_ids_inmem(MYMAPPING *mymapping, MYTRIPLES *mytmpdata, int tid
 		HASH_DEL(mytmpdata, t);
 		free(t);
 	}
+
 	return newdata;
 }
 
