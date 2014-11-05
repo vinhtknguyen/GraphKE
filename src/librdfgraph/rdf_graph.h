@@ -1,9 +1,10 @@
 /*
- * graphke.h
+ * GraphKE
+
+ * Copyrights 2014 Vinh Nguyen, Wright State University, USA.
  *
- *  Created on: Oct 22, 2014
- *      Author: vinh
  */
+
 
 #ifndef RDF_GRAPH_H_
 #define RDF_GRAPH_H_

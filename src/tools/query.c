@@ -1,8 +1,8 @@
 /*
- * gen_dict_gz.c
- * Using zlib to read the RDF file.
- *  Created on: Jun 30, 2014
- *      Author: Vinh Nguyen
+ * GraphKE
+
+ * Copyrights 2014 Vinh Nguyen, Wright State University, USA.
+ *
  */
 
 #include <errno.h>
@@ -166,9 +166,42 @@ int main(int argc, char *argsv[]) {
 					struct timeval tvBegin, tvEndDict, tvEndReverse, tvDiff;
 					gettimeofday(&tvBegin, NULL);
 					if (DEBUG == 1) timeval_print(&tvBegin);
+					int path = NODE_PATH;
 
+					find_shortest_path(start, end, path);
+					free(start);
+					free(end);
 
-					find_shortest_path(start, end);
+					//end of generating dictionary
+					gettimeofday(&tvEndDict, NULL);
+					if (DEBUG == 1) timeval_print(&tvEndDict);
+
+					// diff
+					timeval_subtract(&tvDiff, &tvEndDict, &tvBegin);
+					printf("Total: %ld.%06ld sec\n", (long int)tvDiff.tv_sec,
+							(long int)tvDiff.tv_usec);
+				} else if ((para = strstr(buffer, "nlan_path")) != NULL){
+
+					char *start = NULL, *end = NULL;
+					// Getting the input
+					start = readline ("start node:");
+					start = trimwhitespace(start);
+					add_history(start);
+					if (DEBUG == 1) printf("Start at %s:\n", start);
+
+					end = readline ("end node:");
+					end = trimwhitespace(end);
+					add_history(end);
+
+					if (DEBUG == 1) printf("End at %s:\n", end);
+					//						if (DEBUG == 1) printf("Finding the shortest path from %s to %s\n", start, end);
+
+					struct timeval tvBegin, tvEndDict, tvEndReverse, tvDiff;
+					gettimeofday(&tvBegin, NULL);
+					if (DEBUG == 1) timeval_print(&tvBegin);
+
+					int path = NLAN_PATH;
+					find_shortest_path(start, end, path);
 					free(start);
 					free(end);
 

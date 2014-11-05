@@ -1,9 +1,10 @@
 /*
- * load_db.c
- * Using zlib to read the RDF file.
- *  Created on: Jun 30, 2014
- *      Author: Vinh Nguyen
+ * GraphKE
+
+ * Copyrights 2014 Vinh Nguyen, Wright State University, USA.
+ *
  */
+
 
 #include <graphke.h>
 

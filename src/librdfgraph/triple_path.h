@@ -1,9 +1,10 @@
 /*
- * triple_path.h
+ * GraphKE
+
+ * Copyrights 2014 Vinh Nguyen, Wright State University, USA.
  *
- *  Created on: Oct 22, 2014
- *      Author: vinh
  */
+
 
 #ifndef TRIPLE_PATH_H_
 #define TRIPLE_PATH_H_

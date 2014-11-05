@@ -1,9 +1,10 @@
 /*
- * rdf_graph.c
+ * GraphKE
+
+ * Copyrights 2014 Vinh Nguyen, Wright State University, USA.
  *
- *  Created on: Oct 22, 2014
- *      Author: vinh
  */
+
 
 #include <db.h>
 #include <graphke.h>

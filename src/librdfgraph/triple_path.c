@@ -1,8 +1,8 @@
 /*
- * triplepath.c
+ * GraphKE
+
+ * Copyrights 2014 Vinh Nguyen, Wright State University, USA.
  *
- *  Created on: Oct 23, 2014
- *      Author: vinh
  */
 
 #include <pqueue.h>
@@ -32,8 +32,8 @@ typedef struct term{
 
 pri_queue pairbuffer;
 
-int explore_neighbors_loop(PATHNODE **, DB *dbp, id_type startid, id_type endid, id_type id, int distance, pri_queue pqueue, int sink_excluded);
-int path_bulk(char *filein, char* fileout, int n);
+int explore_neighbors_loop(PATHNODE **, DB *dbp, id_type startid, id_type endid, id_type id, int distance, pri_queue pqueue, int sink_excluded, int pathtype);
+int path_bulk(char *filein, char* fileout, int n, int pathtype);
 void *path_bulk_pthread(void *);
 void show_node_path_inmem(PATHNODE **pathnodes, id_type startid, id_type endid);
 void show_triple_path_inmem(PATHNODE **pathnodes, id_type startid, id_type endid, id_type, id_type, id_type);
@@ -358,7 +358,12 @@ int generate_term_pairs(char *filein, char *fileout){
 	return num;
 }
 
-int path_bulk(char *filein, char* fileout, int n){
+struct bulk_thread{
+	int path_type;
+	char *fileout;
+};
+
+int path_bulk(char *filein, char* fileout, int n, int pathtype){
 
 	/*
 	 * Read the filein and put all the terms into a queue
@@ -431,7 +436,10 @@ int path_bulk(char *filein, char* fileout, int n){
 		strcpy(files[i], fileout);
 		strcat(files[i], "_");
 		strcat(files[i], istr);
-		err = pthread_create(&(threadids[i]), &attr, &path_bulk_pthread, (void *)files[i]);
+		struct bulk_thread *in = (struct bulk_thread*)malloc(sizeof(struct bulk_thread));
+		in->path_type = pathtype;
+		in->fileout = files[i];
+		err = pthread_create(&(threadids[i]), &attr, &path_bulk_pthread, (void *)in);
 		if (err != 0) printf("\ncan't create thread %d:[%s]", i, strerror(err));
 	}
 	// /Experiments/cprojects/GraphKE/developer_logs/test_yagoinput.txt
@@ -483,7 +491,9 @@ int generate_pairs(TERM *nodehead, FILE *fo){
 	return size;
 }
 
-void *path_bulk_pthread(void *fileout_str){
+void *path_bulk_pthread(void *in){
+
+	struct bulk_thread *input = (struct bulk_thread*) in;
 
 	PAIR *pair;
 	id_type p;
@@ -491,7 +501,7 @@ void *path_bulk_pthread(void *fileout_str){
 	int ret;
 	int i = 0;
 
-	char *fo_str = (char*) fileout_str;
+	char *fo_str = (char*) input->fileout;
 	FILE *fo = fopen(fo_str, "a+");
 
 	if (fo == NULL){
@@ -521,7 +531,7 @@ void *path_bulk_pthread(void *fileout_str){
 				struct timeval tvStart, tvEnd, tvDiff;
 				gettimeofday(&tvStart, NULL);
 
-				ret = find_shortest_path(startstr, endstr);
+				ret = find_shortest_path(startstr, endstr, input->path_type);
 
 				gettimeofday(&tvEnd, NULL);
 				timeval_subtract(&tvDiff, &tvEnd, &tvStart);
@@ -548,7 +558,7 @@ void *path_bulk_pthread(void *fileout_str){
 	return 0;
 }
 
-int start_finding(id_type startid, id_type endid){
+int start_finding(id_type startid, id_type endid, int path){
 	int ret;
 
 	int sink_excluded = 1;
@@ -576,30 +586,31 @@ int start_finding(id_type startid, id_type endid){
 	while (1){
 		//		if (DEBUG == 1) printf("Next round\n");
 		id = (id_type)priq_pop(pqueue, &dis);
-		// Not yet visited
 		if (id == 0) {
 			ret = 0;
 			break;
+		} else if (id == endid){
+			ret = dis;
+			char *endstr = print_dbt_str(&id, ID_TYPE);
+			char *startstr = print_dbt_str(&startid, ID_TYPE);
+//			printf("%s\n", endstr);
+			printf("Found shortest path from %s to %s %d\n", startstr, endstr, dis);
+			free(endstr);
+			free(startstr);
+			break;
 		}
-//		termtmp = NULL;
-//		HASH_FIND_PTR(termsvisited, &id, termtmp);
-//		if (termtmp == NULL){
-			if (DEBUG == 1){
-				printf("Exploring node ");
-				printf(ID_TYPE_FORMAT, id);
-				printf(" with pri: %d", dis);
-				printf("\n");
-			}
-			ret = explore_neighbors_loop(&pathnodes, data_s2po_db_p, startid, endid, id, (int)dis, pqueue, sink_excluded);
-			if (ret > 0){
+		if (DEBUG == 1){
+			printf("Exploring node ");
+			printf(ID_TYPE_FORMAT, id);
+			printf(" with pri: %d", dis);
+			printf("\n");
+		}
+		// Not yet visited
+		ret = explore_neighbors_loop(&pathnodes, data_s2po_db_p, startid, endid, id, (int)dis, pqueue, sink_excluded, path);
+		if (ret > 0){
 //							printf("Found path distance %d\n", ret);
-				break;
-			}
-//			termtmp = (TERM*) malloc(sizeof(TERM));
-//			termtmp->id = id;
-//			HASH_ADD_PTR(termsvisited, id, termtmp);
-//		} else {
-//		}
+			break;
+		}
 		//		if (DEBUG == 1){
 		//			printf("Popped item: ");
 		//			printf(ID_TYPE_FORMAT, id);
@@ -611,13 +622,15 @@ int start_finding(id_type startid, id_type endid){
 
 
 	PATHNODE *d, *pt;
-	//	if (DEBUG == 1) printf("\n\nPrinting priqueue\n");
-	//		for(d = pathnodes; d != NULL; d=d->hh.next) {
-	//			printf("Node %s has previous %s and distance ", lookup_id_reverse(rdict_db_p, d->id), lookup_id_reverse(rdict_db_p, d->previd));
-	//			printf(ID_TYPE_FORMAT, d->distance);
-	//			printf("\n");
-	//		}
-	//		if (DEBUG == 1) printf("\n\nEnd Printing priqueue\n");
+//		if (DEBUG == 1) {
+//			printf("\n\nPrinting path nodes\n");
+//			for(d = pathnodes; d != NULL; d=d->hh.next) {
+//				printf("Node %s has previous %s and distance ", lookup_id_reverse(rdict_db_p, d->id), lookup_id_reverse(rdict_db_p, d->previd));
+//				printf(ID_TYPE_FORMAT, d->distance);
+//				printf("\n");
+//				printf("\n\nEnd Printing path nodes\n");
+//			}
+//		}
 
 	// Print the path
 	PATHNODE *de, *n, *nt;
@@ -626,6 +639,8 @@ int start_finding(id_type startid, id_type endid){
 		show_node_path_inmem(&pathnodes, startid, endid);
 		printf("Triple path:\n");
 		show_triple_path_inmem(&pathnodes, startid, endid, -1, -1, -1);
+	} else {
+		printf("No path.\n");
 	}
 	//	if (ret == 1){
 	//		printf("Path:\n");
@@ -654,7 +669,7 @@ int start_finding(id_type startid, id_type endid){
 	return ret;
 }
 
-int find_shortest_path(char *start, char *end){
+int find_shortest_path(char *start, char *end, int path){
 	int ret = 1;
 
 	// Look up for id
@@ -682,7 +697,7 @@ int find_shortest_path(char *start, char *end){
 			printf(ID_TYPE_FORMAT, endid);
 			printf(")...\n");
 		}
-		ret = start_finding(startid, endid);
+		ret = start_finding(startid, endid, path);
 	} else {
 		if (DEBUG == 1) printf("Invalid input\n");
 	}
@@ -777,7 +792,6 @@ void show_path(DB* tmp_db, id_type startid, id_type endid){
 
 int put_node(PATHNODE **pathnodes, id_type nodeid, id_type prev, int dis, id_type sub, id_type pred, id_type obj){
 	PATHNODE *d, *n, *nt;
-//	char *tmp = lookup_id_reverse(rdict_db_p, nodeid);
 	//	printf("Adding key: %s ", tmp);
 	//	printf(" previd: %s ", lookup_id_reverse(rdict_db_p, prev));
 	//	printf(" dis: %d\n", dis);
@@ -810,12 +824,15 @@ int put_node(PATHNODE **pathnodes, id_type nodeid, id_type prev, int dis, id_typ
 			newnode->object = obj;
 		}
 		HASH_ADD_PTR(*pathnodes, id, newnode);
-		//		if (DEBUG == 1) {
-		//			tmp = lookup_id_reverse(rdict_db_p, newnode->id);
-		//			printf("Added key: %s ", tmp);
-		//			printf(" previd: %s ", lookup_id_reverse(rdict_db_p, newnode->previd));
-		//			printf(" dis: %d\n", newnode->distance);
-		//		}
+//		if (DEBUG == 1) {
+//			char *key = lookup_id_reverse_full_form(rdict_db_p, newnode->id);
+//			char *previous = lookup_id_reverse_full_form(rdict_db_p, newnode->previd);
+//			printf("Added key: %s ", key);
+//			printf(" previd: %s ", previous);
+//			printf(" dis: %d\n", newnode->distance);
+//			free(key);
+//			free(previous);
+//		}
 	}
 	return ret;
 }
@@ -879,7 +896,7 @@ int put_tmp_db(DB* dbp, id_type id, id_type prev, int dis){
 }
 
 
-int explore_neighbors_loop(PATHNODE **pathnodes, DB *dbp, id_type startid, id_type endid, id_type id, int distance, pri_queue pqueue, int sink_excluded){
+int explore_neighbors_loop(PATHNODE **pathnodes, DB *dbp, id_type startid, id_type endid, id_type id, int distance, pri_queue pqueue, int sink_excluded, int pathtype){
 	DBT key, value;
 	DBC *cursorp;
 	int ret, ret1;
@@ -915,30 +932,60 @@ int explore_neighbors_loop(PATHNODE **pathnodes, DB *dbp, id_type startid, id_ty
 				POID *poid = (POID*)value.data;
 				predicate = poid->predicate;
 				object = poid->object;
-				//			ret1 = put_tmp_db(tmp_db, predicate, id, distance + 1);
-				//			if (DEBUG == 1){
-				//				printf("From %s ==============>>>>>>>", lookup_id_reverse(rdict_db_p, predicate));
-				//				printf("to %s \n", lookup_id_reverse(rdict_db_p, id));
-				//			}
-				ret1 = put_node(pathnodes, predicate, id, distance + 1, id, predicate, object);
+				if (pathtype == NODE_PATH){
+					//			ret1 = put_tmp_db(tmp_db, predicate, id, distance + 1);
+					//			if (DEBUG == 1){
+					//				printf("From %s ==============>>>>>>>", lookup_id_reverse(rdict_db_p, predicate));
+					//				printf("to %s \n", lookup_id_reverse(rdict_db_p, id));
+					//			}
+					ret1 = put_node(pathnodes, predicate, id, distance + 1, id, predicate, object);
 
-				if (predicate == endid && predicate > 0){
-					char *predstr = print_dbt_str(&predicate, ID_TYPE);
-					char *startstr = print_dbt_str(&startid, ID_TYPE);
-					printf("%s\n", predstr);
-					printf("Found shortest path from %s to %s %d\n", startstr, predstr, distance+1);
-					free(predstr);
-					free(startstr);
-					//				show_path(tmp_db_p, startid, id);
-					//				printf(ID_TYPE_FORMAT, id);
-					//				printf("\t");
-					//				printf(ID_TYPE_FORMAT, predicate);
-					return distance+1;
-				}
-				if (predicate % 2 == 0 && sink_excluded == 1){
-					if (ret1 == 1){
-						// Shorter distance found
-						priq_push(pqueue, (void*)predicate, distance + 1);
+	//				if (predicate == endid && predicate > 0){
+	//					char *predstr = print_dbt_str(&predicate, ID_TYPE);
+	//					char *startstr = print_dbt_str(&startid, ID_TYPE);
+	//					printf("%s\n", predstr);
+	//					printf("Found shortest path from %s to %s %d\n", startstr, predstr, distance+1);
+	//					free(predstr);
+	//					free(startstr);
+	//					return distance+1;
+	//				}
+					if (predicate % 2 == 0 && sink_excluded == 1){
+						if (ret1 == 1){
+							// Shorter distance found
+							priq_push(pqueue, (void*)predicate, distance + 1);
+						}
+					}
+
+					ret1 = put_node(pathnodes, object, predicate, distance + 2, id, predicate, object);
+	//				if (object == endid  && object > 0){
+	//					char *objstr = print_dbt_str(&object, ID_TYPE);
+	//					char *startstr = print_dbt_str(&startid, ID_TYPE);
+	//					printf("Found shortest path from %s %s %d\n", startstr, objstr, distance + 2);
+	//					free(objstr);
+	//					free(startstr);
+	//					return distance+2;
+	//				}
+					if (object % 2 == 0 && sink_excluded == 1){
+						if (ret1 == 1){
+							// Shorter distance found
+							priq_push(pqueue, (void*)object, distance + 2);
+						}
+					}
+				} else if (pathtype == NLAN_PATH){
+					ret1 = put_node(pathnodes, object, id, distance + 1, id, predicate, object);
+	//				if (object == endid  && object > 0){
+	//					char *objstr = print_dbt_str(&object, ID_TYPE);
+	//					char *startstr = print_dbt_str(&startid, ID_TYPE);
+	//					printf("Found shortest path from %s %s %d\n", startstr, objstr, distance + 2);
+	//					free(objstr);
+	//					free(startstr);
+	//					return distance+2;
+	//				}
+					if (object % 2 == 0 && sink_excluded == 1){
+						if (ret1 == 1){
+							// Shorter distance found
+							priq_push(pqueue, (void*)object, distance + 1);
+						}
 					}
 				}
 
@@ -947,25 +994,6 @@ int explore_neighbors_loop(PATHNODE **pathnodes, DB *dbp, id_type startid, id_ty
 				//				printf("From %s  ==============>>>>>>>", lookup_id_reverse(rdict_db_p, object));
 				//				printf("to %s \n", lookup_id_reverse(rdict_db_p, predicate));
 				//			}
-				ret1 = put_node(pathnodes, object, predicate, distance + 2, id, predicate, object);
-				if (object == endid  && object > 0){
-					char *objstr = print_dbt_str(&object, ID_TYPE);
-					char *startstr = print_dbt_str(&startid, ID_TYPE);
-//					printf("%s\n", objstr);
-					printf("Found shortest path from %s %s %d\n", startstr, objstr, distance + 2);
-					free(objstr);
-					free(startstr);
-					//				show_path(tmp_db_p, startid, id);
-					//				printf(ID_TYPE_FORMAT, id);
-					//				printf("\t");
-					return distance+2;
-				}
-				if (object % 2 == 0 && sink_excluded == 1){
-					if (ret1 == 1){
-						// Shorter distance found
-						priq_push(pqueue, (void*)object, distance + 2);
-					}
-				}
 
 				break;
 			case DB_NOTFOUND:
