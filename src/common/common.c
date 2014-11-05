@@ -60,9 +60,9 @@ void timeval_print(struct timeval *tv) {
 	printf(" = %s.%06ld\n", buffer, (long int)tv->tv_usec);
 }
 
-u_int32_t hash(const void* buffer, unsigned length, u_int32_t init){
+u_int32_t hash(DB* db, const void* buffer, unsigned length){
    char* key = (char*)(buffer);
-   u_int32_t a=0x9E3779B9,b=0x9E3779B9,c=init;
+   u_int32_t a=0x9E3779B9,b=0x9E3779B9,c=0;
    // Hash the main part
    while (length>=12) {
       a += (u_int32_t)(key[0])|(u_int32_t)(key[1]<<8)|(u_int32_t)(key[2]<<16)|(u_int32_t)(key[3]<<24);

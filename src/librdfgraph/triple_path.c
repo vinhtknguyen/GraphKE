@@ -20,13 +20,13 @@ typedef struct pathnode{
 } PATHNODE;
 
 typedef struct pair{
-	id_type start;
-	id_type end;
+	char *start;
+	char *end;
 	UT_hash_handle hh;
 }PAIR;
 
 typedef struct term{
-	id_type id;
+	char* term;
 	UT_hash_handle hh;
 }TERM;
 
@@ -37,6 +37,7 @@ int path_bulk(char *filein, char* fileout, int n);
 void *path_bulk_pthread(void *);
 void show_node_path_inmem(PATHNODE **pathnodes, id_type startid, id_type endid);
 void show_triple_path_inmem(PATHNODE **pathnodes, id_type startid, id_type endid, id_type, id_type, id_type);
+int generate_term_pairs(char *filein, char *fileout);
 
 void db_op(char *db, char* str, char* op){
 	DB *dbp;
@@ -259,7 +260,7 @@ int generate_term_pairs(char *filein, char *fileout){
 	char *linebuff = NULL;
 	ssize_t linelen = 0;
 	TERM *nodehead = NULL;
-
+	int num = 0;
 
 	char *pos = NULL, *prevpos = NULL, *start, *end;
 	while ((linelen = getline(&linebuff, &linesize, fi)) > 0) {
@@ -287,7 +288,7 @@ int generate_term_pairs(char *filein, char *fileout){
 			}
 			if (strcmp(prevpos, pos) != 0){
 				// Generating pairs
-				generate_pairs(nodehead, fo);
+				num += generate_pairs(nodehead, fo);
 				TERM *t, *tt;
 				HASH_ITER(hh, nodehead, t, tt) {
 					HASH_DEL(nodehead, t);
@@ -307,41 +308,41 @@ int generate_term_pairs(char *filein, char *fileout){
 					printf("\n");
 				}
 				TERM *tmp = NULL;
-				id_type id1 = lookup_id(dict_db_p, newstart);
-				if (id1 > 0){
-					HASH_FIND_PTR(nodehead, &id1, tmp);
+//				id_type id1 = lookup_id(dict_db_p, newstart);
+					HASH_FIND_STR(nodehead, newstart, tmp);
 					if (tmp == NULL) {
 						TERM *term1 = malloc(sizeof(TERM));
-						term1->id = id1;
-						HASH_ADD_PTR(nodehead, id, term1);
+						term1->term = newstart;
+						HASH_ADD_STR(nodehead, term, term1);
 					}
-				}
 
 				tmp = NULL;
-				id_type id2 = lookup_id(dict_db_p, newend);
-				if (id2 > 0){
-					HASH_FIND_PTR(nodehead, &id2, tmp);
+//				id_type id2 = lookup_id(dict_db_p, newend);
+//				if (id2 > 0){
+					HASH_FIND_STR(nodehead, newend, tmp);
 					if (tmp == NULL) {
 						TERM *term2 = malloc(sizeof(TERM));
-						term2->id = id2;
-						HASH_ADD_PTR(nodehead, id, term2);
+						term2->term = newend;
+						HASH_ADD_STR(nodehead, term, term2);
 					}
-				}
+//				}
 				if (DEBUG == 1) {
 					printf("Got ");
-					printf(ID_TYPE_FORMAT, id1);
+					printf(ID_TYPE_FORMAT, newstart);
 					printf("\t");
 					printf("Got ");
-					printf(ID_TYPE_FORMAT, id2);
+					printf(ID_TYPE_FORMAT, newend);
 					printf("\n");
 				}
-				free(newstart);
-				free(newend);
+//				free(newstart);
+//				free(newend);
 
 			}
 		}
 	}
-	if (nodehead != NULL) generate_pairs(nodehead, fo);
+	if (nodehead != NULL) {
+		num += generate_pairs(nodehead, fo);
+	}
 	free(prevpos);
 	free(linebuff);
 
@@ -354,7 +355,7 @@ int generate_term_pairs(char *filein, char *fileout){
 
 	fclose(fi);
 	fclose(fo);
-	return 0;
+	return num;
 }
 
 int path_bulk(char *filein, char* fileout, int n){
@@ -402,8 +403,8 @@ int path_bulk(char *filein, char* fileout, int n){
 			end = strtok(NULL, "\t");
 			if (start != NULL && end != NULL){
 				PAIR *newpair1 = (PAIR*) malloc(sizeof(PAIR));
-				newpair1->start = lookup_id(dict_db_p, start);
-				newpair1->end = lookup_id(dict_db_p, end);
+				newpair1->start = strdup(start);
+				newpair1->end = strdup(end);
 				priq_push(pairbuffer, newpair1, 0);
 			}
 		}
@@ -412,8 +413,8 @@ int path_bulk(char *filein, char* fileout, int n){
 	fclose(fo);
 	fclose(fi);
 
-	(void)mutex_init(&write_data_s2po_db_lock, NULL);
-	(void)mutex_init(&write_dict_db_lock, NULL);
+	(void)mutex_init(&pop_buffer_queue_lock, NULL);
+	(void)mutex_init(&write_output_file_lock, NULL);
 
 	pthread_attr_t attr;
 	pthread_attr_init(&attr);
@@ -421,10 +422,16 @@ int path_bulk(char *filein, char* fileout, int n){
 	if (DEBUG == 1) printf("Start creating threads \n");
 
 	pthread_t threadids[n];
+	char *files[n], istr[5];
 	int err, i = 0;
 	void *status;
 	for (i = 0; i < n; i++){
-		err = pthread_create(&(threadids[i]), &attr, &path_bulk_pthread, (void *)fileout);
+		sprintf(istr, "%d", i);
+		files[i] = malloc(strlen(fileout) + strlen(istr) + 2);
+		strcpy(files[i], fileout);
+		strcat(files[i], "_");
+		strcat(files[i], istr);
+		err = pthread_create(&(threadids[i]), &attr, &path_bulk_pthread, (void *)files[i]);
 		if (err != 0) printf("\ncan't create thread %d:[%s]", i, strerror(err));
 	}
 	// /Experiments/cprojects/GraphKE/developer_logs/test_yagoinput.txt
@@ -440,8 +447,8 @@ int path_bulk(char *filein, char* fileout, int n){
 		}
 	}
 
-	pthread_mutex_destroy(&write_data_s2po_db_lock);
-	pthread_mutex_destroy(&write_dict_db_lock);
+	pthread_mutex_destroy(&pop_buffer_queue_lock);
+	pthread_mutex_destroy(&write_output_file_lock);
 
 
 	return 0;
@@ -456,7 +463,7 @@ int generate_pairs(TERM *nodehead, FILE *fo){
 	if (DEBUG == 1) printf("Generating pairs\n");
 	for (d1 = nodehead; d1 != NULL; d1=d1->hh.next){
 		for (d2 = nodehead; d2 != NULL; d2=d2->hh.next){
-			if (d2->id != d1->id){
+			if (strcmp(d2->term,d1->term) != 0){
 				size++;
 //				if (DEBUG == 1) {
 //					printf("From ");
@@ -465,9 +472,9 @@ int generate_pairs(TERM *nodehead, FILE *fo){
 //					printf(ID_TYPE_FORMAT, d2->id);
 //					printf("\n");
 //				}
-				term1 = print_dbt_str(&(d1->id), ID_TYPE);
-				term2 = print_dbt_str(&(d2->id), ID_TYPE);
-				fprintf(fo, "%s\t%s\t\n", term1, term2);
+//				term1 = print_dbt_str(&(d1->id), ID_TYPE);
+//				term2 = print_dbt_str(&(d2->id), ID_TYPE);
+				fprintf(fo, "%s\t%s\t\n", d1->term, d2->term);
 				free(term1);
 				free(term2);
 			}
@@ -494,35 +501,42 @@ void *path_bulk_pthread(void *fileout_str){
 
 	char *startstr, *endstr;
 	while (1){
+		(void)mutex_lock(&pop_buffer_queue_lock);
 		pair = (PAIR*)priq_pop(pairbuffer, &p);
+		(void)mutex_unlock(&pop_buffer_queue_lock);
 		if (pair != NULL){
 
-			struct timeval tvStart, tvEnd, tvDiff;
-			gettimeofday(&tvStart, NULL);
-			printf("%d\n", i++);
-
-			if (DEBUG == 1) {
+//			if (DEBUG == 1) {
 //				printf("From ");
-//				printf(ID_TYPE_FORMAT, start);
+//				printf(ID_TYPE_FORMAT, pair->start);
 //				printf(" to ");
-//				printf(ID_TYPE_FORMAT, end);
+//				printf(ID_TYPE_FORMAT, pair->end);
 //				printf("\n");
+//			}
+
+			startstr = pair->start;
+			endstr = pair->end;
+			if (startstr != NULL && endstr != NULL){
+				printf("%d finding from %s to %s\n", i, startstr, endstr);
+				struct timeval tvStart, tvEnd, tvDiff;
+				gettimeofday(&tvStart, NULL);
+
+				ret = find_shortest_path(startstr, endstr);
+
+				gettimeofday(&tvEnd, NULL);
+				timeval_subtract(&tvDiff, &tvEnd, &tvStart);
+
+	//			(void)mutex_lock(&write_output_file_lock);
+				fprintf(fo, "%d\t", ret);
+				fprintf(fo, "%ld.%06ld sec\t", (long int)tvDiff.tv_sec,(long int)tvDiff.tv_usec);
+				fprintf(fo, "%s\t", startstr);
+				fprintf(fo, "%s\n", endstr);
+	//			(void)mutex_unlock(&write_output_file_lock);
+				printf("%d got from %s to %s in ", i++, startstr, endstr);
+				printf("%ld.%06ld sec\n", (long int)tvDiff.tv_sec,(long int)tvDiff.tv_usec);
+
 			}
 
-			ret = start_finding(pair->start, pair->end);
-			startstr = print_dbt_str(&(pair->start), ID_TYPE);
-			endstr = print_dbt_str(&(pair->end), ID_TYPE);
-
-			gettimeofday(&tvEnd, NULL);
-			timeval_subtract(&tvDiff, &tvEnd, &tvStart);
-
-			fprintf(fo, "%d\t", ret);
-			fprintf(fo, "%ld.%06ld sec\t", (long int)tvDiff.tv_sec,(long int)tvDiff.tv_usec);
-			fprintf(fo, "%s\t", startstr);
-			fprintf(fo, "%s\n", endstr);
-
-			free(startstr);
-			free(endstr);
 			free(pair);
 
 		} else {
@@ -541,8 +555,10 @@ int start_finding(id_type startid, id_type endid){
 
 	pri_queue pqueue = priq_new(0);
 	id_type id;
-	pri_type dis = 1;
+	pri_type dis = 0;
 	PATHNODE *pathnodes = NULL, *pathnode, *nodetmp;
+	TERM *termsvisited = NULL, *term, *termtmp;
+
 
 	id_type nodeid_stat = lookup_stat(stat_s2po_db_p, startid);
 	if (nodeid_stat < 0){
@@ -561,21 +577,29 @@ int start_finding(id_type startid, id_type endid){
 		//		if (DEBUG == 1) printf("Next round\n");
 		id = (id_type)priq_pop(pqueue, &dis);
 		// Not yet visited
-		if (DEBUG == 1){
-			printf("Exploring node ");
-			printf(ID_TYPE_FORMAT, id);
-			printf(" with pri: %d", dis);
-			printf("\n");
-		}
 		if (id == 0) {
 			ret = 0;
 			break;
 		}
-		ret = explore_neighbors_loop(&pathnodes, data_s2po_db_p, startid, endid, id, (int)dis, pqueue, sink_excluded);
-		if (ret > 0){
-			//			printf("Found\n");
-			break;
-		}
+//		termtmp = NULL;
+//		HASH_FIND_PTR(termsvisited, &id, termtmp);
+//		if (termtmp == NULL){
+			if (DEBUG == 1){
+				printf("Exploring node ");
+				printf(ID_TYPE_FORMAT, id);
+				printf(" with pri: %d", dis);
+				printf("\n");
+			}
+			ret = explore_neighbors_loop(&pathnodes, data_s2po_db_p, startid, endid, id, (int)dis, pqueue, sink_excluded);
+			if (ret > 0){
+//							printf("Found path distance %d\n", ret);
+				break;
+			}
+//			termtmp = (TERM*) malloc(sizeof(TERM));
+//			termtmp->id = id;
+//			HASH_ADD_PTR(termsvisited, id, termtmp);
+//		} else {
+//		}
 		//		if (DEBUG == 1){
 		//			printf("Popped item: ");
 		//			printf(ID_TYPE_FORMAT, id);
@@ -597,7 +621,7 @@ int start_finding(id_type startid, id_type endid){
 
 	// Print the path
 	PATHNODE *de, *n, *nt;
-	if (ret > 0){
+	if (ret > 0 && DEBUG == 1){
 		printf("Node path:\n");
 		show_node_path_inmem(&pathnodes, startid, endid);
 		printf("Triple path:\n");
@@ -620,6 +644,10 @@ int start_finding(id_type startid, id_type endid){
 		HASH_DEL(pathnodes, n);
 		free(n);
 	}
+//	HASH_ITER(hh, termsvisited, term, termtmp) {
+//		HASH_DEL(termsvisited, term);
+//		free(term);
+//	}
 	free(pqueue->buf);
 	free(pqueue);
 	//	remove_tmp_db(tmp_db_p, "tmp", 0);
@@ -896,9 +924,11 @@ int explore_neighbors_loop(PATHNODE **pathnodes, DB *dbp, id_type startid, id_ty
 
 				if (predicate == endid && predicate > 0){
 					char *predstr = print_dbt_str(&predicate, ID_TYPE);
+					char *startstr = print_dbt_str(&startid, ID_TYPE);
 					printf("%s\n", predstr);
-					printf("Found shortest path for %s %d\n", predstr, distance+1);
+					printf("Found shortest path from %s to %s %d\n", startstr, predstr, distance+1);
 					free(predstr);
+					free(startstr);
 					//				show_path(tmp_db_p, startid, id);
 					//				printf(ID_TYPE_FORMAT, id);
 					//				printf("\t");
@@ -906,10 +936,10 @@ int explore_neighbors_loop(PATHNODE **pathnodes, DB *dbp, id_type startid, id_ty
 					return distance+1;
 				}
 				if (predicate % 2 == 0 && sink_excluded == 1){
-//					if (ret1 == 1){
+					if (ret1 == 1){
 						// Shorter distance found
 						priq_push(pqueue, (void*)predicate, distance + 1);
-//					}
+					}
 				}
 
 				//			ret1 = put_tmp_db(tmp_db, object, predicate, distance + 2);
@@ -920,19 +950,21 @@ int explore_neighbors_loop(PATHNODE **pathnodes, DB *dbp, id_type startid, id_ty
 				ret1 = put_node(pathnodes, object, predicate, distance + 2, id, predicate, object);
 				if (object == endid  && object > 0){
 					char *objstr = print_dbt_str(&object, ID_TYPE);
-					printf("%s\n", objstr);
-					printf("Found shortest path for %s %d\n", objstr, distance + 2);
+					char *startstr = print_dbt_str(&startid, ID_TYPE);
+//					printf("%s\n", objstr);
+					printf("Found shortest path from %s %s %d\n", startstr, objstr, distance + 2);
 					free(objstr);
+					free(startstr);
 					//				show_path(tmp_db_p, startid, id);
 					//				printf(ID_TYPE_FORMAT, id);
 					//				printf("\t");
 					return distance+2;
 				}
 				if (object % 2 == 0 && sink_excluded == 1){
-//					if (ret1 == 1){
+					if (ret1 == 1){
 						// Shorter distance found
 						priq_push(pqueue, (void*)object, distance + 2);
-//					}
+					}
 				}
 
 				break;

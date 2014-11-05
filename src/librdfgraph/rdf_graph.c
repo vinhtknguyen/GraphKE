@@ -1056,6 +1056,44 @@ DBTYPE get_dbtype(char *type){
 	return DB_HASH;
 }
 
+
+uint32_t
+hash_term(DB* dbp, const void* key, u_int32_t len)
+{
+	char *str = (char*) key;
+    uint32_t hash = 5381;
+    uint32_t c;
+
+    while (c = *str++)
+        hash = ((hash << 5) + hash) + c; /* hash * 33 + c */
+
+    return hash;
+}
+
+uint32_t
+hash_id_type(DB* db, const void*key, uint32_t len){
+	id_type num = atoi(key);
+	uint32_t hash = (num*2654435761) % (2^32);
+	return hash;
+}
+
+
+uint32_t jenkins_one_at_a_time_hash_term(DB* db, const char *key, uint32_t len)
+{
+    uint32_t hash, i;
+    for(hash = i = 0; i < len; ++i)
+    {
+        hash += key[i];
+        hash += (hash << 10);
+        hash ^= (hash >> 6);
+    }
+    hash += (hash << 3);
+    hash ^= (hash >> 11);
+    hash += (hash << 15);
+    return hash;
+}
+
+
 int init_dbs(char *db_name, u_int32_t flags) {
 	/* Global variables */
 
@@ -1107,7 +1145,7 @@ int init_dbs(char *db_name, u_int32_t flags) {
 	}
 
 	/* Setting up the hash function for the dictionary */
-	dict_db_p->set_h_hash = hash;
+	dict_db_p->set_h_hash = jenkins_one_at_a_time_hash_term;
 	dict_db_p->set_priority(dict_db_p, DB_PRIORITY_VERY_HIGH);
 
 	/* Now open the persistent database for the dictionary */
@@ -1132,7 +1170,7 @@ int init_dbs(char *db_name, u_int32_t flags) {
 		goto err;
 	}
 	rdict_db_p->set_priority(rdict_db_p, DB_PRIORITY_VERY_HIGH);
-	rdict_db_p->set_h_hash = hash;
+	rdict_db_p->set_h_hash = hash_id_type;
 	/* Now open the persistent database for the dictionary */
 	ret = rdict_db_p->open(rdict_db_p, /* Pointer to the database */
 			0, /* Txn pointer */
@@ -1155,7 +1193,7 @@ int init_dbs(char *db_name, u_int32_t flags) {
 	}
 
 	/* Setting up the hash function for the dictionary */
-	dict_prefixes_db_p->set_h_hash = hash;
+	dict_prefixes_db_p->set_h_hash = hash_term;
 	dict_prefixes_db_p->set_priority(dict_prefixes_db_p, DB_PRIORITY_VERY_HIGH);
 
 	/* Now open the persistent database for the dictionary */
@@ -1203,6 +1241,7 @@ int init_dbs(char *db_name, u_int32_t flags) {
 
 	data_s2po_db_p->set_priority(data_s2po_db_p, DB_PRIORITY_VERY_HIGH);
 	data_s2po_db_p->set_flags(data_s2po_db_p, DB_DUP);
+	data_s2po_db_p->set_h_hash = hash_id_type;
 //	u_int32_t data_s2po_hff_size = (int)(data_s2po_db_p->get_pagesize - 32)/(int)(sizeof(id_type) + sizeof(POID) + 8);
 //	data_s2po_db_p->set_h_ffactor(data_s2po_db_p, data_s2po_hff_size);
 	/* Now open the persistent database for the dictionary */
@@ -1251,6 +1290,7 @@ int init_dbs(char *db_name, u_int32_t flags) {
 	}
 
 	stat_s2po_db_p->set_flags(stat_s2po_db_p, DB_DUP);
+	stat_s2po_db_p->set_h_hash = hash_id_type;
 //	u_int32_t stat_s2po_hff_size = (int)(stat_s2po_db_p->get_pagesize - 32)/(int)(sizeof(id_type) + sizeof(id_type) + 8);
 //	stat_s2po_db_p->set_h_ffactor(stat_s2po_db_p, stat_s2po_hff_size);
 
@@ -1532,6 +1572,7 @@ int load_dir_one_round_inmem(char *rdf_datadir, char *parser_type, int threads, 
 	serialize_prefixes((void*)(intptr_t)3);
 
 	serialize_all();
+	data_s2po_db_p->sync(data_s2po_db_p,0);
 
 
 	MYDICTIONARY *it, *itt;
@@ -1868,9 +1909,11 @@ int extract_triples(char *linebuff, MYPREFIXES *myprefixes, char** res_p, int ti
 					if (strcmp(term, "@base") == 0 || strcmp(term, "@prefix") == 0){
 						prefix_line = 1;
 					}
+//					if (DEBUG == 1) printf("Thread %d: Found spo %d \t %s %d\n", tid, spo, term, strlen(term));
+					if (term == NULL) return -1;
 					res_p[spo] = get_full_form_term(myprefixes, term, prefix_line);
-//					if (DEBUG == 1) printf("Thread %d: Found spo %d \t %s \n", tid, spo, term);
-//					if (DEBUG == 1) printf("Thread %d: Found full spo %d \t %s \n", tid, spo, res_p[spo]);
+					if (res_p[spo] == NULL) return -1;
+//					if (DEBUG == 1) printf("Thread %d: Found full spo %d \t %s %d\n", tid, spo, res_p[spo], strlen(term));
 					free(term);
 
 					//								if (DEBUG == 1) printf("Thread %d: Found spo %d\t %s \n", tid, spo, res_p[spo]);
@@ -1931,7 +1974,7 @@ void* load_one_round_inmem_pthread(void* thread_id){
 	// Load data file into line buffer
 	// Create two inmemory temporary maps of dictionary and data
 	// Resolve the id in idmap and generate the
-	int tid = (intptr_t)thread_id;
+	uint32_t tid = (intptr_t)thread_id;
 	int file;
 	struct timeval tvBegin, tvEnd, tvDiff;
 	if (DEBUG == 1) printf("Thread %d with ID %ld started\n", tid, (long)pthread_self());
@@ -1940,18 +1983,7 @@ void* load_one_round_inmem_pthread(void* thread_id){
 	char tid_str[5];
 	sprintf(tid_str, "%d", tid);
 
-	tmp_data_p = init_tmp_db(tid_str, 0, 1);
-	id_type node_id = tid * 10000000000 + 2;
-	id_type node_id_odd = node_id + 1;
-	id_type triple_id = (tid == 0)?1:tid*10000000000;
-
-	if (DEBUG == 1) printf("Triple's ID starts at ");
-	if (DEBUG == 1) printf(ID_TYPE_FORMAT, triple_id);
-	if (DEBUG == 1) printf("URI's ID starts at ");
-	if (DEBUG == 1) printf(ID_TYPE_FORMAT, node_id);
-	if (DEBUG == 1) printf("\t Literal's ID starts at ");
-	if (DEBUG == 1) printf(ID_TYPE_FORMAT, node_id_odd);
-	if (DEBUG == 1) printf("\n");
+//	tmp_data_p = init_tmp_db(tid_str, 0, 1);
 
 	FILE *ifp;
 	size_t cur_size;
@@ -1959,6 +1991,17 @@ void* load_one_round_inmem_pthread(void* thread_id){
 	char *rdf_dfile;
 
 	struct timeval start, end, diff;
+	id_type thread_resource_id = tid * 500000000 + 2;
+	id_type thread_literal_id = thread_resource_id + 1;
+	id_type triple_id = (tid == 0)?1:tid*500000000;
+
+	if (DEBUG == 1) printf("Triple's ID starts at ");
+	if (DEBUG == 1) printf(ID_TYPE_FORMAT, triple_id);
+	if (DEBUG == 1) printf("URI's ID starts at ");
+	if (DEBUG == 1) printf(ID_TYPE_FORMAT, thread_resource_id);
+	if (DEBUG == 1) printf("\t Literal's ID starts at ");
+	if (DEBUG == 1) printf(ID_TYPE_FORMAT, thread_literal_id);
+	if (DEBUG == 1) printf("\n");
 
 
 //	for (file = tid; file < num_files; file = file + load_threads);
@@ -2041,7 +2084,6 @@ void* load_one_round_inmem_pthread(void* thread_id){
 					p2u_p->prefix = res_p[1];
 					p2u_p->uri = res_p[2];
 					HASH_ADD_STR(myprefixes, prefix, p2u_p );
-					free(res_p[0]);
 //					(void)mutex_unlock(&update_prefix_ns_lock);
 				} else if (prefix_line == 0){
 					// Processing the dictionary and indexes
@@ -2059,24 +2101,20 @@ void* load_one_round_inmem_pthread(void* thread_id){
 							HASH_FIND_STR(mydicttmp, res_p[i], dicttmp);
 							if(dicttmp == NULL){
 								if (strstr(res_p[i], "\"") != NULL){
-									res_id[i] = node_id_odd;
+									res_id[i] = thread_literal_id;
+									thread_literal_id += 2;
 								} else {
-									res_id[i] = node_id;
+									res_id[i] = thread_resource_id;
+									thread_resource_id += 2;
 								}
 								MYDICTIONARY *dictitem = (MYDICTIONARY*) malloc(sizeof(MYDICTIONARY));
 								// Add URI into the tmpdict;
 
-								dictitem->term = malloc(strlen(res_p[i]) + 1);
-								strcpy(dictitem->term, res_p[i]);
+								dictitem->term = strdup(res_p[i]);
 								dictitem->id = res_id[i];
 //								if (DEBUG == 1) printf("going to put this term to temp dict %s\n", dictitem->term);
 								HASH_ADD_STR(mydicttmp, term, dictitem );
 //								if (DEBUG == 1) printf("putting this item to temp dict %s\n", dictitem->term);
-								if (strstr(res_p[i], "\"") != NULL){
-									node_id_odd = node_id_odd + 2;
-								} else {
-									node_id = node_id + 2;
-								}
 							} else {
 								res_id[i] = dicttmp->id;
 							}
@@ -2211,6 +2249,8 @@ void* load_one_round_inmem_pthread(void* thread_id){
 		/* free the myprefixes contents */
 		free(rdf_dfile);
 	}
+
+
 //	int done_merge_data = 0;
 //	while (done_merge_data == 0){
 //
@@ -2231,7 +2271,7 @@ void* load_one_round_inmem_pthread(void* thread_id){
 //			(void)mutex_unlock(&write_data_s2po_db_lock);
 //		}
 //	}
-	remove_tmp_db(tmp_data_p, tid_str, 0);
+//	remove_tmp_db(tmp_data_p, tid_str, 0);
 	return 0;
 	err:
 	printf("error");
@@ -2279,6 +2319,7 @@ MYTRIPLES* resolve_ids_inmem(MYMAPPING *mymapping, MYTRIPLES *mytmpdata, int tid
 		HASH_DEL(mymapping, it);
 		free(it);
 	}
+
 	MYTRIPLES *t, *tt;
 	/* free the mymapping contents */
 	HASH_ITER(hh, mytmpdata, t, tt) {
@@ -2303,7 +2344,6 @@ MYMAPPING *merging_ids_inmem(MYDICTIONARY *mydicttmp, int tid){
 		MYDICTIONARY *dictitem = NULL;
 		HASH_FIND_STR(inmemdict, d->term, dictitem);
 		if (dictitem != NULL){
-			d->target = dictitem->id;
 			m = (MYMAPPING*) malloc(sizeof(MYMAPPING));
 			m->source = d->id;
 			m->target = dictitem->id;
@@ -2318,8 +2358,7 @@ MYMAPPING *merging_ids_inmem(MYDICTIONARY *mydicttmp, int tid){
 		} else {
 			dictitem = (MYDICTIONARY*) malloc(sizeof(MYDICTIONARY));
 
-			dictitem->term = malloc(strlen(d->term) + 1);
-			strcpy(dictitem->term, d->term);
+			dictitem->term = strdup(d->term);
 			dictitem->id = d->id;
 			HASH_ADD_STR(inmemdict, term, dictitem);
 //			if (DEBUG == 1) {
@@ -2384,20 +2423,20 @@ void* serialize_dict(void* threadid){
 	for(d = mydicttmp; d != NULL; d=d->hh.next) {
 		// Getting the id from the main dict
 //
-//						printf("thread %d insert data item for key: %s and value ", tid, d->term);
+//						printf("thread %d insert data item for key: %s %d and value ", tid, d->term, strlen(d->term));
 //						printf(ID_TYPE_FORMAT, d->id);
 //						printf("\n");
 
 		//				ret = put_data_item(tmp_data_p, res_id[0], res_id[1], res_id[2]);
 		if (d->id % 2 == 0){
-			char *term = get_short_form_term(d->term);
-//			char *term = d->term;
+//			char *term = get_short_form_term(d->term);
+			char *term = d->term;
 			if (term != NULL){
 
 				id_type id = d->id;
 				DB_MULTIPLE_KEY_WRITE_NEXT(ptrk, &key, term, strlen(term) + 1, &id, sizeof(id_type));
 	//			DB_MULTIPLE_KEY_WRITE_NEXT(ptrrk, &rkey, &id, sizeof(id_type), term, strlen(term) + 1);
-				free(term);
+//				free(term);
 				assert(ptrk != NULL);
 				num++;
 		//		if (DEBUG == 1) printf("thread %d asserted ptr\n", tid);
@@ -2451,6 +2490,7 @@ void* serialize_dict(void* threadid){
 //		}
 //	}
 
+	dict_db_p->sync(dict_db_p, 0);
 
 //	printf("Dictionary size: %ld", num);
 	free(key.data);
@@ -2522,7 +2562,7 @@ void* serialize_prefixes(void* threadid){
 	for(d = inmem_u2p; d != NULL; d=d->hh.next) {
 		// Getting the id from the main dict
 
-//		printf("thread %d insert data item for prefix: %s and uri %s", tid, d->prefix, d->uri);
+//		printf("thread %d insert data item for prefix: %s %d and uri %s %d\n", tid, d->prefix, strlen(d->prefix), d->uri, strlen(d->uri));
 
 		//				ret = put_data_item(tmp_data_p, res_id[0], res_id[1], res_id[2]);
 
@@ -2556,6 +2596,7 @@ void* serialize_prefixes(void* threadid){
 			goto err;
 		}
 	}
+	dict_prefixes_db_p->sync(dict_prefixes_db_p, 0);
 
 //	printf("Dictionary size: %ld", num);
 	free(key.data);
@@ -2607,13 +2648,13 @@ void* serialize_rdict(void *threadid){
 //						printf("\t for value : %s \n", d->term);
 
 		//				ret = put_data_item(tmp_data_p, res_id[0], res_id[1], res_id[2]);
-//		char *term = d->term;
-		char *term = get_short_form_term(d->term);
+		char *term = d->term;
+//		char *term = get_short_form_term(d->term);
 		if (term != NULL){
 
 			id_type id = d->id;
 			DB_MULTIPLE_KEY_WRITE_NEXT(ptrrk, &rkey, &id, sizeof(id_type), term, strlen(term) + 1);
-			free(term);
+//			free(term);
 			assert(ptrrk != NULL);
 			num++;
 			if (num % UPDATES_PER_BULK_PUT == 0) {
@@ -2642,6 +2683,8 @@ void* serialize_rdict(void *threadid){
 		}
 	}
 
+	rdict_db_p->sync(rdict_db_p, 0);
+
 //	printf("Dictionary size: %ld", num);
 	free(rkey.data);
 	free(rvalue.data);
@@ -2661,6 +2704,7 @@ void* serialize_stat(void* threadid){
 	gettimeofday(&start, NULL);
 
 	gen_stat_db(data_s2po_db_p, stat_s2po_db_p);
+	stat_s2po_db_p->sync(stat_s2po_db_p, 0);
 
 	gettimeofday(&end, NULL);
 	timeval_subtract(&diff, &end, &start);
@@ -2783,9 +2827,10 @@ int compare_idtriple(SPOID *s1, SPOID *s2){
 }
 
 char *get_short_form_term(char *in){
+//	if (DEBUG == 1) printf("input is %s\n", in, strlen(in));
 	char *ret = NULL;
-	char *instr = malloc(strlen(in) + 1);
-	strcpy(instr, in);
+	char *instr = strdup(in);
+
 	if (in[0] == '"' || (in[0] == '_' && in[1] == ':')){
 		return instr;
 	}
@@ -2800,25 +2845,29 @@ char *get_short_form_term(char *in){
 					break;
 				}
 			}
-	//		if (DEBUG == 1) printf("last pos of /# is %d in %s\n", last_slash_pos, in);
+//			if (DEBUG == 1) printf("last pos of /# is %d in %s\n", last_slash_pos, in);
 
 			if (last_slash_pos != -1){
 
-				char* ns = malloc(last_slash_pos + 3);
-				strcpy(ns, "<");
-				strncat(ns, in + 1, last_slash_pos);
-				strcat(ns, ">");
-				ns[last_slash_pos + 2] = '\0';
+				char* tmp = malloc((size_t)last_slash_pos + 3);
+				memcpy(tmp, in, last_slash_pos + 1);
+				tmp[last_slash_pos + 1] = '>';
+				tmp[last_slash_pos + 2] = '\0';
+//				if (DEBUG == 1) printf(" tmp %s and %d\n", tmp, strlen(tmp));
 
-				size_t size = strlen(in) - 2 - last_slash_pos + 1;
-				char *resource = malloc(size);
+				char* ns = strdup(tmp);
+				free(tmp);
+//				if (DEBUG == 1) printf(" ns %s and %d\n", ns, strlen(ns));
+
+				size_t resource_size = strlen(in) - 2 - last_slash_pos + 1;
+				char *resource = malloc(resource_size);
 				int j = 0;
 				for (i = last_slash_pos + 1; i < strlen(in); i++){
 					resource[j] = in[i];
 					j++;
 				}
-				resource[size-1] = '\0';
-		//		if (DEBUG == 1) printf(" %s is splitted into %s and %s\n", in, ns, resource);
+				resource[resource_size-1] = '\0';
+//				if (DEBUG == 1) printf(" %s is splitted into %s and %s\n", in, ns, resource);
 
 				MYPREFIXES *prefixtmp = NULL, *d;
 		//		if (DEBUG == 1){
@@ -2838,11 +2887,11 @@ char *get_short_form_term(char *in){
 						sprintf(nsshort, "ns%d", numns);
 		//				if (DEBUG == 1) printf("short prefix of %s is %s\n", in, nsshort);
 						MYPREFIXES *u2p_p = (MYPREFIXES*)malloc(sizeof(MYPREFIXES));
-						u2p_p->prefix = malloc(strlen(nsshort) + 1);
-						strcpy(u2p_p->prefix, nsshort);
-						u2p_p->uri = ns;
+						u2p_p->prefix = strdup(nsshort);
+						u2p_p->uri = strdup(ns);
 //						if (DEBUG == 1) printf("insert new prefix, short form of %s is %s\n", ns, nsshort);
 						HASH_ADD_STR(inmem_u2p, uri, u2p_p );
+						free(ns);
 						done_adding_prefix = 1;
 						(void)mutex_unlock(&update_prefix_ns_lock);
 					}
@@ -2852,7 +2901,7 @@ char *get_short_form_term(char *in){
 		//					printf("Dict temp item prefix %s with uri %s\n", d->prefix, d->uri);
 		//				}
 		//			}
-					char *short_form = malloc(strlen(nsshort) + strlen(resource) + 2);
+					char *short_form = malloc(strlen(nsshort) + resource_size + 2);
 					strcpy(short_form, nsshort);
 					strcat(short_form, ":");
 					strcat(short_form,resource);
@@ -2863,7 +2912,7 @@ char *get_short_form_term(char *in){
 				} else {
 		//			if (DEBUG == 1) printf("found prefix for short form of %s is %s and %s\n", ns, prefixtmp->prefix, prefixtmp->uri);
 					if (strcmp(prefixtmp->prefix, "@base") == 0){
-						char *short_form = malloc(strlen(resource) + 3);
+						char *short_form = malloc(resource_size + 3);
 						strcpy(short_form, "<");
 						strcat(short_form, resource);
 						strcat(short_form, ">");
@@ -2874,7 +2923,7 @@ char *get_short_form_term(char *in){
 						free(instr);
 						return short_form;
 					} else {
-						char *short_form = malloc(strlen(resource) + strlen(prefixtmp->prefix) + 2);
+						char *short_form = malloc(resource_size + strlen(prefixtmp->prefix) + 2);
 						strcpy(short_form, prefixtmp->prefix);
 						strcat(short_form, ":");
 						strcat(short_form, resource);
@@ -2929,7 +2978,8 @@ char *get_short_form_term_from_db(char *in){
 
 			size_t size = strlen(in) - 2 - last_slash_pos + 1;
 			if (size > 0){
-				resource = malloc(sizeof(char) * (strlen(in) - 2 - last_slash_pos + 1));
+				size_t resource_size = strlen(in) - 2 - last_slash_pos + 1;
+				resource = malloc(resource_size);
 //				int j = 0;
 //				for (i = last_slash_pos + 1; i < strlen(in) - 1; i++){
 //					resource[j] = in[i];
@@ -2944,7 +2994,7 @@ char *get_short_form_term_from_db(char *in){
 				prefix = lookup_prefix(ns);
 //				if (DEBUG == 1) printf("prefix is %s of len %d\n", prefix, strlen(prefix));
 				if (prefix != NULL){
-					char *short_form = malloc(strlen(prefix) + strlen(resource) + 2);
+					char *short_form = malloc(strlen(prefix) + resource_size + 2);
 					strcpy(short_form, prefix);
 					strcat(short_form, ":");
 					strcat(short_form,resource);
@@ -2962,10 +3012,15 @@ char *get_short_form_term_from_db(char *in){
 }
 
 char *get_full_form_term(MYPREFIXES *pr, char *in, int prefix_line){
+//			if (DEBUG == 1) printf("input is %s %d\n", in, strlen(in));
 	char *rets;
-	char *instr = malloc(strlen(in) + 1);
-	strcpy(instr, in);
-	//		if (DEBUG == 1) printf("input is %s\n", in);
+	char *instr = NULL;
+	if (in != NULL){
+		instr = strdup(in);
+	} else return 0;
+//	strcpy(instr, in);
+//	instr[strlen(in)] = '\0';
+//	if (DEBUG == 1) printf("input copy is %s %d\n", instr, strlen(instr));
 	MYPREFIXES *pref = NULL;
 
 	if (instr[0] == '<'){
@@ -2982,7 +3037,7 @@ char *get_full_form_term(MYPREFIXES *pr, char *in, int prefix_line){
 		if (pref != NULL){
 			size_t size = strlen(pref->uri) + strlen(instr) - 1;
 			rets = malloc(size);
-			//		printf("size:%d", size);
+//			//		printf("size:%d", size);
 			int i = 0, j = 1;
 			for (i = 0; i < strlen(pref->uri) - 1; i++){
 				rets[i] = pref->uri[i];
@@ -2991,6 +3046,9 @@ char *get_full_form_term(MYPREFIXES *pr, char *in, int prefix_line){
 				rets[i] = in[j];
 				j++;
 			}
+//			strncpy(rets, pref->uri, strlen(pref->uri) - 1);
+//			strncat(rets, instr + 1, strlen(instr) - 1);
+//			mempcpy(mempcpy(rets, pref->uri, strlen(pref->uri) - 1), instr + 1, strlen(instr) - 1);
 			rets[size - 1] = '\0';
 
 			//		if (DEBUG == 1) printf("output full uri %s with size %d\n", ret, strlen(ret));
@@ -3088,8 +3146,8 @@ char *get_full_form_term(MYPREFIXES *pr, char *in, int prefix_line){
 
 char *get_full_form_term_from_db(char *in, int prefix_line){
 	char *rets, *prefixuri;
-	char *instr = malloc(strlen(in) + 1);
-	strcpy(instr, in);
+	char *instr = strdup(in);
+//	strcpy(instr, in);
 //			if (DEBUG == 1) printf("input is %s\n", in);
 	MYPREFIXES *pref = NULL;
 

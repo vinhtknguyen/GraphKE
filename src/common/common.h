@@ -11,11 +11,12 @@
 #include <string.h>
 #include <stdlib.h>
 #include <time.h>
+#include <db.h>
 
 /* Function declarations*/
 
 
-u_int32_t hash(const void*, unsigned, u_int32_t);
+u_int32_t hash(DB* db,const void*, unsigned);
 void timeval_print(struct timeval*);
 int timeval_subtract(struct timeval *result, struct timeval *t2, struct timeval *t1);
 int count_data_files(char*);
